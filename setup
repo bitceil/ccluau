@@ -1,0 +1,45 @@
+#!/bin/bash
+set -e
+
+# fetch latest release info
+echo "fetching latest lune release info..."
+RELEASE_DATA=$(curl -s https://api.github.com/repos/lune-org/lune/releases/latest)
+LATEST_TAG=$(echo "$RELEASE_DATA" | jq -r '.tag_name')
+DOWNLOAD_URL=$(echo "$RELEASE_DATA" | jq -r '.assets[] | select(.name | contains("linux-x86_64")) | .browser_download_url')
+
+echo "latest version is $LATEST_TAG"
+
+# check if we already have this version
+VERSION_FILE="lune/release_version"
+if [ -f "$VERSION_FILE" ]; then
+    CURRENT_VERSION=$(cat "$VERSION_FILE")
+    if [ "$CURRENT_VERSION" == "$LATEST_TAG" ]; then
+        echo "lune is already up to date ($CURRENT_VERSION)."
+        exit 0
+    fi
+fi
+
+# create dir and download
+mkdir -p lune
+echo "downloading lune..."
+curl -L -o lune.zip "$DOWNLOAD_URL"
+
+echo "extracting..."
+unzip -o lune.zip -d lune
+rm lune.zip
+
+# create version file
+echo "$LATEST_TAG" > lune/release_version
+
+# make lune executable just in case
+chmod +x lune/lune
+
+# put lune in path via symlink to /usr/local/bin
+echo "adding lune to /usr/local/bin..."
+sudo ln -sf "$(pwd)/lune/lune" /usr/local/bin/lune
+
+# setup type definitions
+echo "setting up type definitions..."
+lune setup
+
+echo "done. lune $LATEST_TAG is ready to go."
