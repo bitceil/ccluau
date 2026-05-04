@@ -49,4 +49,4 @@ to get autocompletion and type checking for the CC:Tweaked API, add this to your
 
 ## license
 
-MIT - copyright (c) 2024 bitceil
+MIT - copyright (c) 2026 bitceil
