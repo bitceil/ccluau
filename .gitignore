@@ -2,3 +2,4 @@
 .lune/
 dist/
 lune/
+tests/*.lua
