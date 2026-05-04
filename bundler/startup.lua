@@ -1,83 +1,103 @@
 -- ccluau startup script
--- this script enables luau support by hooking loadfile and load
+-- hooks environment to support .luau files
 
-local bundlePath = "ccluau.lua"
-
-if fs.exists(bundlePath) then
-	local h = fs.open(bundlePath, "r")
-	local content = h.readAll()
-	h.close()
-
-	local f, err = loadstring(content, "@/" .. bundlePath)
+if not _G.luau then
+	local bundlePath = "ccluau.lua"
+	local f = fs.open(bundlePath, "r")
+	if not f then
+		bundlePath = "/ccluau.lua"
+		f = fs.open(bundlePath, "r")
+	end
+	
 	if f then
-		local ok, err = pcall(f, require)
-		if not ok then
-			printError("Failed to initialize ccluau: " .. err)
+		local content = f.readAll()
+		f.close()
+		local fn, err = loadstring(content, "@/" .. bundlePath)
+		if fn then
+			pcall(fn, require)
 		end
-	else
-		printError("Failed to parse ccluau: " .. err)
 	end
 end
 
 if _G.luau then
 	local function transpile_if_luau(content, chunkname)
 		if type(chunkname) == "string" and chunkname:match("%.luau$") then
-			-- print("Luau: Transpiling " .. chunkname)
 			local ok, res = pcall(_G.luau.transpile, content)
-			if ok then
-				-- print("Luau: Success (" .. #res .. " bytes)")
-				return res
-			end
+			if ok then return res end
 			printError("Luau: Transpilation failed for " .. chunkname)
 			printError(res)
 		end
 		return content
 	end
 
-	-- Hook load
+	local function get_shell()
+		return _G.shell or shell or (multishell and multishell.getCurrent and multishell.getTabEnv and multishell.getTabEnv(multishell.getCurrent()).shell)
+	end
+
 	local native_load = _G.load
+	local native_loadfile = _G.loadfile
+
+	local function luau_searcher(package, env)
+		return function(name)
+			local s = get_shell()
+			local dir = s and s.dir and s.dir() or ""
+
+			if name:match("%.lua[u]?$") then
+				local path = name
+				if path:sub(1, 1) ~= "/" then
+					path = fs.combine(dir, path)
+				end
+				if fs.exists(path) and not fs.isDir(path) then
+					local fnFile, sError = _G.loadfile(path, nil, env)
+					if fnFile then return fnFile, path end
+					return nil, sError
+				end
+				return nil, "no file '" .. path .. "'"
+			end
+
+			local luau_path = "?.luau;?/init.luau"
+			local searchpath = package.searchpath
+			local sPath, sError = searchpath(name, luau_path)
+			if sPath then
+				local fnFile, sError = _G.loadfile(sPath, nil, env)
+				if fnFile then return fnFile, sPath end
+				return nil, sError
+			end
+			return nil, sError
+		end
+	end
+
+	local injected_envs = setmetatable({}, { __mode = "k" })
+
 	_G.load = function(chunk, chunkname, mode, env)
 		if type(chunk) == "string" then
 			chunk = transpile_if_luau(chunk, chunkname)
-		elseif type(chunk) == "function" then
-			-- If it's a function (file reader), we have to be careful.
-			-- For now, if the chunkname is luau, read it all and transpile.
-			if type(chunkname) == "string" and chunkname:match("%.luau$") then
-				local t = {}
-				while true do
-					local s = chunk()
-					if not s or s == "" then
-						break
-					end
-					table.insert(t, s)
-				end
-				local content = table.concat(t)
-				return native_load(transpile_if_luau(content, chunkname), chunkname, mode, env)
+		end
+		if type(env) == "table" and not injected_envs[env] then
+			if type(env.package) == "table" and type(env.package.loaders) == "table" then
+				table.insert(env.package.loaders, 2, luau_searcher(env.package, env))
+				injected_envs[env] = true
 			end
 		end
 		return native_load(chunk, chunkname, mode, env)
 	end
 
-	-- Hook loadstring
 	local native_loadstring = _G.loadstring
-	if native_loadstring then
-		_G.loadstring = function(str, chunkname)
-			str = transpile_if_luau(str, chunkname)
-			return native_loadstring(str, chunkname)
-		end
+	_G.loadstring = function(content, chunkname)
+		content = transpile_if_luau(content, chunkname)
+		return native_loadstring(content, chunkname)
 	end
 
-	-- Hook loadfile
-	local native_loadfile = _G.loadfile
 	_G.loadfile = function(filename, mode, env)
 		if type(mode) == "table" and env == nil then
 			mode, env = nil, mode
 		end
 		local targetFile = filename
-		if not fs.exists(targetFile) and shell and shell.resolve then
-			targetFile = shell.resolve(filename)
+		local s = get_shell()
+		if not fs.exists(targetFile) and s and s.resolve then
+			targetFile = s.resolve(filename)
 		end
-		if not fs.exists(targetFile) and not targetFile:find("%.") then
+		if not fs.exists(targetFile) and not targetFile:match("%.lua[u]?$") then
 			if fs.exists(targetFile .. ".luau") then
 				targetFile = targetFile .. ".luau"
 			end
@@ -93,67 +113,18 @@ if _G.luau then
 		return native_loadfile(filename, mode, env)
 	end
 
-	-- Hook require
-	local native_require = _G.require
-	_G.require = function(name)
-		-- Try native require first (handles .lua and already loaded modules)
-		local ok, res = pcall(native_require, name)
-		if ok then
-			return res
-		end
-
-		if package and package.loaded[name] then
-			return package.loaded[name]
-		end
-
-		-- We use loadfile because we've already hooked it to handle .luau transpilation
-		local f, err = loadfile(name) -- loadfile hook handles appending .luau
-		if f then
-			local res = f()
-			if package then
-				package.loaded[name] = res or true
-			end
-			return res or true
-		end
-
-		-- Fallback to the original error if we still can't find anything
-		error(err or ("module '" .. name .. "' not found"), 2)
-	end
-
-	-- Hook shell.resolveProgram to find .luau files
-	if shell and shell.resolveProgram then
-		local native_resolve = shell.resolveProgram
-		shell.resolveProgram = function(name)
+	if get_shell() and get_shell().resolveProgram then
+		local native_resolve = get_shell().resolveProgram
+		get_shell().resolveProgram = function(name)
 			local res = native_resolve(name)
-			if res then
-				return res
-			end
-			if not name:find("%.") then
+			if res then return res end
+			if not name:match("%.lua[u]?$") then
 				res = native_resolve(name .. ".luau")
-				if res then
-					return res
-				end
+				if res then return res end
 			end
 			return nil
 		end
 	end
 
 	print("Luau support enabled.")
-
-	-- Run startup.luau if it exists
-	if fs.exists("startup.luau") then
-		shell.run("startup.luau")
-	end
-
-	-- Support .luau files in the startup directory
-	if fs.exists("startup") and fs.isDir("startup") then
-		for _, file in ipairs(fs.list("startup")) do
-			if file:match("%.luau$") then
-				local path = fs.combine("startup", file)
-				if not fs.isDir(path) then
-					shell.run(path)
-				end
-			end
-		end
-	end
 end
