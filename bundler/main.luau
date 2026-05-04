@@ -160,7 +160,7 @@ fs.writeFile("dist/ccluau.lua", bundleContent)
 print("bundle created at dist/ccluau.lua")
 
 -- generate setup.lua
-local startupContent = fs.readFile("dist/startup.lua")
+local startupContent = fs.readFile("bundler/startup.lua")
 local setupOutput = string.format(
 	[[
 local ccluau = %s
@@ -174,7 +174,7 @@ local function save(path, content)
 end
 
 save("ccluau.lua", ccluau)
-save("startup.lua", startup)
+save("startup", startup)
 print("Luau setup complete! Cleaning up and rebooting...")
 os.reboot()
 ]],
