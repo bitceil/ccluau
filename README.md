@@ -8,6 +8,7 @@ it preserves line positions for function calls, so when your code crashes in Cra
 
 - **Luau support**: transpile Luau code to Lua 5.1 (Cobalt) compatible code.
 - **self-bundling**: the transpiler is written in Luau and can transpile itself into a single Lua file that runs directly on a CC:Tweaked computer.
+- **standalone executable**: can be compiled into a single binary for Linux (and other platforms) using Lune.
 - **error alignment**: preserves line numbers for function calls so debugging doesn't suck.
 - **type definitions**: includes full type definitions for the CC:Tweaked API.
 - **polyfills**: automatically includes polyfills for Luau features that aren't in standard Lua.
@@ -21,10 +22,17 @@ chmod +x setup
 ./setup
 ```
 
-### CC:Tweaked
-you can generate a setup script for CraftOS by running the bundler:
+#### building a standalone binary
+to build a single executable that you can use anywhere:
 ```bash
-lune run bundler/main.luau
+lune run standalone-bundler/main.luau
+lune build dist/standalone.luau -o ccluau
+```
+
+### CC:Tweaked
+you can generate a setup script for CraftOS by running the CC bundler:
+```bash
+lune run cc-bundler/main.luau
 ```
 this will upload a setup script to x0.at and give you a command to run in your CC:Tweaked computer.
 
@@ -34,6 +42,10 @@ this will upload a setup script to x0.at and give you a command to run in your C
 to transpile a `.luau` file to `.lua`:
 ```bash
 lune run transpiler/main.luau <input.luau> [output.lua]
+```
+or if you built the binary:
+```bash
+./ccluau <input.luau> [output.lua]
 ```
 
 ### vscode setup

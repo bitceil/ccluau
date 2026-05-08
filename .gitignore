@@ -3,3 +3,9 @@
 dist/
 lune/
 tests/*.lua
+ccluau*
+*.lua
+!polyfill/*.lua
+!bundler/*.lua
+!cc-bundler/*.lua
+!cc-bundler/*.lua
